@@ -1,0 +1,3 @@
+# C++ to PlantUML Converter Dependencies
+# No external dependencies required!
+# Uses only Python standard library (re, tkinter, dataclasses)
