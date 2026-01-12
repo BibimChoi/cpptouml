@@ -1,3 +1,11 @@
 # C++ to PlantUML Converter Dependencies
-# No external dependencies required!
-# Uses only Python standard library (re, tkinter, dataclasses)
+
+# Required (built-in, no install needed)
+# - tkinter (Python standard library)
+# - re, dataclasses, pathlib, threading, etc.
+
+# Optional - for image preview
+Pillow>=9.0.0
+
+# Optional - for accurate C++ parsing (requires LLVM/Clang installed)
+# clang>=14.0

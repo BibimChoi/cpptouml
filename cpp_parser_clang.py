@@ -19,6 +19,15 @@ except ImportError:
 
 @dataclass
 class MethodInfo:
+    """
+    C++ 메서드 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 메서드 이름 (생성자/소멸자 포함)
+        return_type: 반환 타입 (생성자/소멸자는 빈 문자열)
+        parameters: 매개변수 리스트 [(이름, 타입), ...]
+        access: 접근 제어자 ('public', 'private', 'protected')
+    """
     name: str
     return_type: str
     parameters: List[tuple]  # [(name, type), ...]
@@ -27,6 +36,14 @@ class MethodInfo:
 
 @dataclass
 class MemberInfo:
+    """
+    C++ 멤버 변수 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 멤버 변수 이름
+        type_name: 변수 타입
+        access: 접근 제어자 ('public', 'private', 'protected')
+    """
     name: str
     type_name: str
     access: str  # public, private, protected
@@ -34,6 +51,17 @@ class MemberInfo:
 
 @dataclass
 class ClassInfo:
+    """
+    C++ 클래스/구조체 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 클래스/구조체 이름
+        members: 멤버 변수 목록
+        methods: 메서드 목록
+        base_classes: 상속받은 부모 클래스 이름 목록
+        file_path: 클래스가 정의된 파일 경로
+        is_struct: 구조체 여부 (True면 struct, False면 class)
+    """
     name: str
     members: List[MemberInfo] = field(default_factory=list)
     methods: List[MethodInfo] = field(default_factory=list)
@@ -43,12 +71,33 @@ class ClassInfo:
 
 
 class CppParserClang:
+    """
+    libclang 기반 C++ 파서.
+
+    LLVM/Clang의 libclang을 사용하여 정확한 AST(Abstract Syntax Tree)
+    기반 파싱을 수행한다. 정규 표현식 파서보다 정확하지만
+    LLVM/Clang 설치가 필요하다.
+
+    Attributes:
+        index: clang Index 객체
+        classes: 파싱된 클래스 정보 딕셔너리 {클래스명: ClassInfo}
+        parsed_files: 이미 파싱된 파일 경로 집합
+
+    Requirements:
+        - pip install clang
+        - LLVM/Clang 설치 (libclang.dll 또는 libclang.so)
+    """
+
     def __init__(self, libclang_path: Optional[str] = None):
         """
-        Initialize the C++ parser using libclang.
+        libclang을 사용하는 파서를 초기화한다.
 
         Args:
-            libclang_path: Path to libclang.dll/libclang.so (optional)
+            libclang_path: libclang 라이브러리 경로 (선택적)
+                          지정하지 않으면 시스템 기본 경로에서 검색
+
+        Raises:
+            ImportError: clang 모듈이 설치되지 않은 경우
         """
         if not HAS_CLANG:
             raise ImportError("clang module not found. Install with: pip install clang")
@@ -61,7 +110,15 @@ class CppParserClang:
         self.parsed_files: Set[str] = set()
 
     def _get_access_specifier(self, cursor) -> str:
-        """Convert clang access specifier to string."""
+        """
+        clang 커서의 접근 제어자를 문자열로 변환한다.
+
+        Args:
+            cursor: clang Cursor 객체
+
+        Returns:
+            str: 'public', 'private', 'protected' 중 하나
+        """
         access = cursor.access_specifier
         if access == ci.AccessSpecifier.PUBLIC:
             return "public"
@@ -72,14 +129,36 @@ class CppParserClang:
         return "private"  # default for class
 
     def _get_type_name(self, type_obj) -> str:
-        """Get clean type name from clang type."""
+        """
+        clang 타입 객체에서 정제된 타입 이름을 추출한다.
+
+        'class ' 또는 'struct ' 접두사를 제거하여 순수 타입명만 반환한다.
+
+        Args:
+            type_obj: clang Type 객체
+
+        Returns:
+            str: 정제된 타입 이름
+        """
         spelling = type_obj.spelling
         # Clean up common patterns
         spelling = spelling.replace("class ", "").replace("struct ", "")
         return spelling
 
     def _parse_class(self, cursor, file_path: str) -> Optional[ClassInfo]:
-        """Parse a class or struct declaration."""
+        """
+        클래스 또는 구조체 선언을 파싱한다.
+
+        커서의 자식 노드들을 순회하며 멤버 변수, 메서드,
+        생성자, 소멸자, 상속 관계를 추출한다.
+
+        Args:
+            cursor: 클래스/구조체 선언의 clang Cursor
+            file_path: 소스 파일 경로
+
+        Returns:
+            Optional[ClassInfo]: 파싱된 클래스 정보, 이름이 없으면 None
+        """
         class_name = cursor.spelling
         if not class_name:
             return None
@@ -155,7 +234,16 @@ class CppParserClang:
         return class_info
 
     def _traverse(self, cursor, file_path: str):
-        """Recursively traverse the AST."""
+        """
+        AST를 재귀적으로 순회하며 클래스/구조체를 수집한다.
+
+        대상 파일에 정의된 클래스/구조체만 처리하고,
+        전방 선언(forward declaration)은 무시한다.
+
+        Args:
+            cursor: 현재 AST 노드의 clang Cursor
+            file_path: 파싱 대상 파일 경로
+        """
         # Only process if in the target file
         if cursor.location.file:
             cursor_file = str(Path(cursor.location.file.name).resolve())
@@ -242,23 +330,54 @@ class CppParserClang:
         return count
 
     def get_classes(self) -> Dict[str, ClassInfo]:
-        """Get all parsed classes."""
+        """
+        파싱된 모든 클래스 정보를 반환한다.
+
+        Returns:
+            Dict[str, ClassInfo]: {클래스명: ClassInfo} 딕셔너리
+        """
         return self.classes
 
     def get_class(self, name: str) -> Optional[ClassInfo]:
-        """Get a specific class by name."""
+        """
+        이름으로 특정 클래스 정보를 조회한다.
+
+        Args:
+            name: 조회할 클래스 이름
+
+        Returns:
+            Optional[ClassInfo]: 클래스 정보, 없으면 None
+        """
         return self.classes.get(name)
 
     def get_class_names(self) -> List[str]:
-        """Get list of all class names."""
+        """
+        파싱된 모든 클래스 이름 목록을 반환한다.
+
+        Returns:
+            List[str]: 클래스 이름 리스트
+        """
         return list(self.classes.keys())
 
     def clear(self):
-        """Clear all parsed data."""
+        """
+        파싱된 모든 데이터를 초기화한다.
+
+        classes와 parsed_files를 비워서
+        새로운 파싱을 준비한다.
+        """
         self.classes.clear()
         self.parsed_files.clear()
 
 
 def is_available() -> bool:
-    """Check if libclang is available."""
+    """
+    libclang 사용 가능 여부를 확인한다.
+
+    clang 모듈이 import 가능한지 확인하여
+    libclang 모드 사용 가능 여부를 반환한다.
+
+    Returns:
+        bool: libclang 사용 가능하면 True
+    """
     return HAS_CLANG

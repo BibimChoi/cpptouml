@@ -9,6 +9,27 @@ from relationship import Relationship, RelationType
 
 
 class PlantUMLGenerator:
+    """
+    PlantUML 클래스 다이어그램 코드 생성기.
+
+    파싱된 C++ 클래스 정보와 관계를 PlantUML 형식의
+    텍스트 코드로 변환한다.
+
+    Class Attributes:
+        ACCESS_SYMBOLS: 접근 제어자별 PlantUML 기호 매핑
+            - public: +
+            - private: -
+            - protected: #
+        RELATIONSHIP_ARROWS: 관계 유형별 PlantUML 화살표 매핑
+            - INHERITANCE: <|--
+            - COMPOSITION: *--
+            - AGGREGATION: o--
+            - DEPENDENCY: ..>
+
+    Attributes:
+        parser: C++ 파서 인스턴스
+    """
+
     # Access specifier symbols
     ACCESS_SYMBOLS = {
         "public": "+",
@@ -26,27 +47,53 @@ class PlantUMLGenerator:
 
     def __init__(self, parser: CppParser):
         """
-        Initialize the PlantUML generator.
+        PlantUML 생성기를 초기화한다.
 
         Args:
-            parser: CppParser instance with parsed classes
+            parser: 클래스 정보가 파싱된 CppParser 인스턴스
         """
         self.parser = parser
 
     def _format_type(self, type_str: str) -> str:
-        """Format type string for PlantUML."""
+        """
+        타입 문자열을 PlantUML 형식에 맞게 변환한다.
+
+        PlantUML에서 특수 문자로 사용되는 < >를 ~로 대체한다.
+
+        Args:
+            type_str: 원본 타입 문자열
+
+        Returns:
+            str: PlantUML용으로 이스케이프된 타입 문자열
+        """
         # Escape special characters
         type_str = type_str.replace("<", "~").replace(">", "~")
         return type_str
 
     def _generate_class(self, class_info: ClassInfo,
                         show_members: bool = True, show_methods: bool = True) -> str:
-        """Generate PlantUML code for a single class.
+        """
+        단일 클래스의 PlantUML 코드를 생성한다.
+
+        클래스 이름, 멤버 변수, 메서드를 PlantUML 형식으로 포맷팅한다.
+        접근 제어자별로 그룹화하여 출력한다.
+
+        출력 형식:
+            class ClassName {
+                +publicMember: Type
+                -privateMember: Type
+                --
+                +publicMethod(): ReturnType
+                -privateMethod(): ReturnType
+            }
 
         Args:
-            class_info: ClassInfo object
-            show_members: Whether to show member variables
-            show_methods: Whether to show methods
+            class_info: 클래스 정보 객체
+            show_members: 멤버 변수 표시 여부
+            show_methods: 메서드 표시 여부
+
+        Returns:
+            str: PlantUML 클래스 정의 코드
         """
         lines = []
 
@@ -124,7 +171,18 @@ class PlantUMLGenerator:
         return "\n".join(lines)
 
     def _generate_relationship(self, rel: Relationship) -> str:
-        """Generate PlantUML code for a relationship."""
+        """
+        관계의 PlantUML 코드를 생성한다.
+
+        관계 유형에 맞는 화살표를 사용하여 두 클래스 간
+        연결을 표현하는 코드를 생성한다.
+
+        Args:
+            rel: Relationship 객체
+
+        Returns:
+            str: PlantUML 관계 코드 (예: "ClassA <|-- ClassB")
+        """
         arrow = self.RELATIONSHIP_ARROWS.get(rel.rel_type, "-->")
 
         if rel.label:
@@ -135,16 +193,27 @@ class PlantUMLGenerator:
     def generate(self, class_names: Set[str], relationships: List[Relationship],
                  title: str = None, component_options: dict = None) -> str:
         """
-        Generate complete PlantUML diagram.
+        완전한 PlantUML 다이어그램 코드를 생성한다.
+
+        @startuml/@enduml을 포함한 완전한 PlantUML 코드를 생성한다.
+        클래스 정의와 관계를 모두 포함한다.
+
+        생성 순서:
+            1. @startuml, 제목, 스타일 설정
+            2. 클래스 정의 (알파벳 순)
+            3. 관계 정의
+            4. @enduml
 
         Args:
-            class_names: Set of class names to include
-            relationships: List of relationships between classes
-            title: Optional diagram title
-            component_options: Dict with 'members' and 'methods' boolean keys
+            class_names: 포함할 클래스 이름 집합
+            relationships: 클래스 간 관계 목록
+            title: 다이어그램 제목 (선택적)
+            component_options: 구성요소 표시 옵션
+                - 'members': 멤버 변수 표시 여부 (bool)
+                - 'methods': 메서드 표시 여부 (bool)
 
         Returns:
-            PlantUML code as string
+            str: 완전한 PlantUML 코드
         """
         # Default options
         show_members = True
@@ -185,17 +254,23 @@ class PlantUMLGenerator:
                             title: str = None, rel_type_filter: list = None,
                             component_options: dict = None) -> str:
         """
-        Generate PlantUML starting from a specific class.
+        시작 클래스 기준으로 PlantUML 코드를 생성한다.
+
+        RelationshipAnalyzer를 사용하여 시작 클래스에서
+        지정된 깊이까지 관계를 분석하고 다이어그램을 생성한다.
 
         Args:
-            start_class: Starting class name
-            max_depth: Maximum relationship depth
-            title: Optional diagram title
-            rel_type_filter: List of relationship types to include (None = all)
-            component_options: Dict with 'members' and 'methods' boolean keys
+            start_class: 시작 클래스 이름
+            max_depth: 최대 탐색 깊이 (기본값: 3)
+            title: 다이어그램 제목 (선택적, 미지정 시 자동 생성)
+            rel_type_filter: 포함할 관계 유형 목록 (None이면 전체)
+                            예: ['inheritance', 'composition']
+            component_options: 구성요소 표시 옵션
+                - 'members': 멤버 변수 표시 여부
+                - 'methods': 메서드 표시 여부
 
         Returns:
-            PlantUML code as string
+            str: 완전한 PlantUML 코드
         """
         from relationship import RelationshipAnalyzer
 
@@ -210,13 +285,16 @@ class PlantUMLGenerator:
 
     def generate_all(self, title: str = None) -> str:
         """
-        Generate PlantUML for all classes.
+        모든 클래스에 대한 PlantUML 코드를 생성한다.
+
+        파싱된 모든 클래스와 그들 간의 관계를 포함하는
+        전체 다이어그램을 생성한다.
 
         Args:
-            title: Optional diagram title
+            title: 다이어그램 제목 (선택적)
 
         Returns:
-            PlantUML code as string
+            str: 완전한 PlantUML 코드
         """
         from relationship import RelationshipAnalyzer
 

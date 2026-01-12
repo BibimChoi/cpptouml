@@ -12,6 +12,15 @@ from pathlib import Path
 
 @dataclass
 class MethodInfo:
+    """
+    C++ 메서드 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 메서드 이름 (생성자/소멸자 포함)
+        return_type: 반환 타입 (생성자/소멸자는 빈 문자열)
+        parameters: 매개변수 리스트 [(이름, 타입), ...]
+        access: 접근 제어자 ('public', 'private', 'protected')
+    """
     name: str
     return_type: str
     parameters: List[tuple]  # [(name, type), ...]
@@ -20,6 +29,14 @@ class MethodInfo:
 
 @dataclass
 class MemberInfo:
+    """
+    C++ 멤버 변수 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 멤버 변수 이름
+        type_name: 변수 타입
+        access: 접근 제어자 ('public', 'private', 'protected')
+    """
     name: str
     type_name: str
     access: str  # public, private, protected
@@ -27,6 +44,17 @@ class MemberInfo:
 
 @dataclass
 class ClassInfo:
+    """
+    C++ 클래스/구조체 정보를 저장하는 데이터 클래스.
+
+    Attributes:
+        name: 클래스/구조체 이름
+        members: 멤버 변수 목록
+        methods: 메서드 목록
+        base_classes: 상속받은 부모 클래스 이름 목록
+        file_path: 클래스가 정의된 파일 경로
+        is_struct: 구조체 여부 (True면 struct, False면 class)
+    """
     name: str
     members: List[MemberInfo] = field(default_factory=list)
     methods: List[MethodInfo] = field(default_factory=list)
@@ -36,16 +64,40 @@ class ClassInfo:
 
 
 class CppParser:
+    """
+    정규 표현식 기반 C++ 파서.
+
+    libclang 없이 정규 표현식만으로 C++ 소스 코드를 분석한다.
+    완벽한 파싱은 아니지만 대부분의 일반적인 클래스 구조를 추출할 수 있다.
+
+    Attributes:
+        classes: 파싱된 클래스 정보 딕셔너리 {클래스명: ClassInfo}
+        parsed_files: 이미 파싱된 파일 경로 집합
+
+    Note:
+        복잡한 템플릿이나 매크로는 제대로 파싱되지 않을 수 있다.
+    """
+
     def __init__(self, libclang_path: Optional[str] = None):
         """
-        Initialize the C++ parser.
-        libclang_path is ignored (kept for compatibility).
+        파서를 초기화한다.
+
+        Args:
+            libclang_path: 무시됨 (CppParserClang과의 인터페이스 호환성 유지용)
         """
         self.classes: Dict[str, ClassInfo] = {}
         self.parsed_files: Set[str] = set()
 
     def _remove_comments(self, content: str) -> str:
-        """Remove C/C++ comments from source code."""
+        """
+        소스 코드에서 C/C++ 주석을 제거한다.
+
+        Args:
+            content: 원본 소스 코드
+
+        Returns:
+            str: 주석이 제거된 소스 코드
+        """
         # Remove single-line comments
         content = re.sub(r'//.*$', '', content, flags=re.MULTILINE)
         # Remove multi-line comments
@@ -53,11 +105,28 @@ class CppParser:
         return content
 
     def _remove_preprocessor(self, content: str) -> str:
-        """Remove preprocessor directives."""
+        """
+        전처리기 지시문(#include, #define 등)을 제거한다.
+
+        Args:
+            content: 소스 코드
+
+        Returns:
+            str: 전처리기 지시문이 제거된 소스 코드
+        """
         return re.sub(r'^\s*#.*$', '', content, flags=re.MULTILINE)
 
     def _find_matching_brace(self, content: str, start: int) -> int:
-        """Find the matching closing brace."""
+        """
+        여는 중괄호에 대응하는 닫는 중괄호 위치를 찾는다.
+
+        Args:
+            content: 소스 코드 문자열
+            start: 여는 중괄호의 인덱스
+
+        Returns:
+            int: 대응하는 닫는 중괄호의 인덱스, 찾지 못하면 -1
+        """
         count = 0
         i = start
         while i < len(content):
@@ -71,7 +140,17 @@ class CppParser:
         return -1
 
     def _parse_parameters(self, params_str: str) -> List[tuple]:
-        """Parse method parameters."""
+        """
+        메서드 매개변수 문자열을 파싱한다.
+
+        템플릿 인자 내의 쉼표를 고려하여 매개변수를 분리한다.
+
+        Args:
+            params_str: 괄호 안의 매개변수 문자열
+
+        Returns:
+            List[tuple]: [(매개변수명, 타입), ...] 리스트
+        """
         params = []
         if not params_str.strip():
             return params
@@ -97,7 +176,17 @@ class CppParser:
         return params
 
     def _parse_single_param(self, param: str) -> tuple:
-        """Parse a single parameter into (name, type)."""
+        """
+        단일 매개변수를 (이름, 타입) 튜플로 파싱한다.
+
+        기본값이 있는 경우 제거하고, 타입과 이름을 분리한다.
+
+        Args:
+            param: 단일 매개변수 문자열 (예: "const std::string& name = \"\"")
+
+        Returns:
+            tuple: (매개변수명, 타입), 이름이 없으면 ("", 타입)
+        """
         # Remove default values
         param = re.sub(r'\s*=\s*[^,)]+', '', param)
         param = param.strip()
@@ -114,7 +203,19 @@ class CppParser:
         return ("", param)
 
     def _parse_class_body(self, body: str, is_struct: bool) -> tuple:
-        """Parse class body to extract members and methods."""
+        """
+        클래스 본문을 파싱하여 멤버와 메서드를 추출한다.
+
+        접근 제어자(public/private/protected)를 추적하며
+        각 줄을 분석하여 멤버 변수와 메서드를 구분한다.
+
+        Args:
+            body: 중괄호 내부의 클래스 본문 문자열
+            is_struct: struct인 경우 True (기본 접근제어자가 public)
+
+        Returns:
+            tuple: (멤버 변수 리스트, 메서드 리스트)
+        """
         members = []
         methods = []
 
@@ -215,7 +316,19 @@ class CppParser:
         return members, methods
 
     def _parse_inheritance(self, inheritance_str: str) -> List[str]:
-        """Parse inheritance declaration."""
+        """
+        상속 선언을 파싱하여 부모 클래스 목록을 추출한다.
+
+        접근 제어자(public/private/protected)와 virtual 키워드를
+        제거하고 순수 클래스 이름만 추출한다.
+
+        Args:
+            inheritance_str: 콜론(:) 이후의 상속 선언 문자열
+                            예: "public Base1, protected Base2"
+
+        Returns:
+            List[str]: 부모 클래스 이름 목록
+        """
         bases = []
         if not inheritance_str:
             return bases
@@ -325,18 +438,41 @@ class CppParser:
         return count
 
     def get_classes(self) -> Dict[str, ClassInfo]:
-        """Get all parsed classes."""
+        """
+        파싱된 모든 클래스 정보를 반환한다.
+
+        Returns:
+            Dict[str, ClassInfo]: {클래스명: ClassInfo} 딕셔너리
+        """
         return self.classes
 
     def get_class(self, name: str) -> Optional[ClassInfo]:
-        """Get a specific class by name."""
+        """
+        이름으로 특정 클래스 정보를 조회한다.
+
+        Args:
+            name: 조회할 클래스 이름
+
+        Returns:
+            Optional[ClassInfo]: 클래스 정보, 없으면 None
+        """
         return self.classes.get(name)
 
     def get_class_names(self) -> List[str]:
-        """Get list of all class names."""
+        """
+        파싱된 모든 클래스 이름 목록을 반환한다.
+
+        Returns:
+            List[str]: 클래스 이름 리스트
+        """
         return list(self.classes.keys())
 
     def clear(self):
-        """Clear all parsed data."""
+        """
+        파싱된 모든 데이터를 초기화한다.
+
+        classes와 parsed_files를 비워서
+        새로운 파싱을 준비한다.
+        """
         self.classes.clear()
         self.parsed_files.clear()

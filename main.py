@@ -34,7 +34,31 @@ except ImportError:
 
 
 class Cpp2PlantUMLApp:
+    """
+    C++ to PlantUML 변환 애플리케이션의 메인 클래스.
+
+    Tkinter 기반 GUI를 제공하며, C++ 프로젝트를 파싱하여
+    PlantUML 클래스 다이어그램으로 변환하는 기능을 제공한다.
+
+    Attributes:
+        root: Tkinter root 윈도우
+        parser: C++ 파서 인스턴스 (CppParser 또는 CppParserClang)
+        generator: PlantUML 생성기 인스턴스
+        class_vars: 클래스별 체크박스 변수 딕셔너리
+        class_widgets: 클래스별 체크박스 위젯 딕셔너리
+        current_plantuml: 현재 생성된 PlantUML 코드
+        current_image: 현재 표시 중인 이미지
+        rel_filter_vars: 관계 유형 필터 체크박스 변수
+        component_filter_vars: 클래스 구성요소 필터 체크박스 변수
+    """
+
     def __init__(self, root):
+        """
+        애플리케이션을 초기화한다.
+
+        Args:
+            root: Tkinter root 윈도우 객체
+        """
         self.root = root
         self.root.title("C++ to PlantUML Converter")
         self.root.geometry("1000x700")
@@ -55,7 +79,20 @@ class Cpp2PlantUMLApp:
         self._setup_ui()
 
     def _setup_ui(self):
-        """Setup the user interface."""
+        """
+        사용자 인터페이스를 구성한다.
+
+        Settings, Filter Options, 버튼, 클래스 목록, PlantUML 출력 영역,
+        액션 버튼, 상태바 등 전체 UI 레이아웃을 생성한다.
+
+        UI 구조:
+            - Settings: 프로젝트 폴더, 시작 클래스, Depth, 파서 모드
+            - Filter Options: 관계 유형 필터, 클래스 구성요소 필터
+            - Buttons: Parse Project, Generate Diagram, Generate All Classes
+            - Content: 좌측 클래스 목록, 우측 PlantUML 출력
+            - Actions: Copy, Save, Preview Online
+            - Status Bar: 현재 상태 표시
+        """
         # Main container
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -274,17 +311,31 @@ class Cpp2PlantUMLApp:
         status_bar.pack(fill=tk.X, pady=(10, 0))
 
     def _on_class_frame_configure(self, event):
-        """Update canvas scroll region."""
+        """
+        클래스 목록 프레임 크기 변경 시 캔버스 스크롤 영역을 업데이트한다.
+
+        Args:
+            event: Configure 이벤트 객체
+        """
         self.class_canvas.configure(scrollregion=self.class_canvas.bbox("all"))
 
     def _browse_folder(self):
-        """Browse for project folder."""
+        """
+        프로젝트 폴더 선택 다이얼로그를 열고 선택된 경로를 설정한다.
+
+        사용자가 폴더를 선택하면 folder_var에 경로가 저장된다.
+        """
         folder = filedialog.askdirectory(title="Select C++ Project Folder")
         if folder:
             self.folder_var.set(folder)
 
     def _on_parser_mode_changed(self):
-        """Show/hide libclang path input based on parser mode."""
+        """
+        파서 모드 변경 시 UI를 업데이트한다.
+
+        libclang 모드 선택 시 libclang 경로 입력 필드를 표시하고,
+        Regex 모드 선택 시 해당 필드를 숨긴다.
+        """
         if self.parser_mode.get() == "clang":
             self.clang_path_label.grid(row=3, column=0, sticky=tk.W, pady=2)
             self.clang_path_entry.grid(row=3, column=1, padx=5, pady=2, sticky=tk.EW)
@@ -295,14 +346,33 @@ class Cpp2PlantUMLApp:
             self.clang_path_btn.grid_forget()
 
     def _browse_libclang(self):
-        """Browse for libclang library."""
+        """
+        libclang 라이브러리 파일 선택 다이얼로그를 연다.
+
+        Windows의 경우 .dll, Linux/Mac의 경우 .so 파일을 선택할 수 있다.
+        선택된 경로는 clang_path_var에 저장된다.
+        """
         filetypes = [("DLL files", "*.dll"), ("SO files", "*.so"), ("All files", "*.*")]
         file_path = filedialog.askopenfilename(title="Select libclang", filetypes=filetypes)
         if file_path:
             self.clang_path_var.set(file_path)
 
     def _parse_project(self):
-        """Parse the C++ project."""
+        """
+        선택된 C++ 프로젝트를 파싱한다.
+
+        선택된 파서 모드(Regex 또는 libclang)에 따라 적절한 파서를 사용하여
+        프로젝트 폴더 내의 모든 C++ 파일을 분석한다.
+        파싱은 별도 스레드에서 수행되어 UI가 블로킹되지 않는다.
+
+        파싱 완료 후:
+            - 클래스 목록이 UI에 표시됨
+            - PlantUML 생성기가 초기화됨
+            - Start Class 콤보박스가 업데이트됨
+
+        Raises:
+            messagebox.showerror: 폴더가 선택되지 않았거나 유효하지 않은 경우
+        """
         folder = self.folder_var.get()
         if not folder:
             messagebox.showerror("Error", "Please select a project folder.")
@@ -338,7 +408,16 @@ class Cpp2PlantUMLApp:
         threading.Thread(target=do_parse, daemon=True).start()
 
     def _update_class_list(self, count, mode_name="Regex"):
-        """Update the class list after parsing."""
+        """
+        파싱 완료 후 클래스 목록 UI를 업데이트한다.
+
+        기존 클래스 목록을 지우고, 파싱된 클래스들의 체크박스를 새로 생성한다.
+        Start Class 콤보박스도 함께 업데이트된다.
+
+        Args:
+            count: 파싱된 파일 수
+            mode_name: 사용된 파서 모드 이름 ("Regex" 또는 "libclang")
+        """
         # Clear existing
         for widget in self.class_list_frame.winfo_children():
             widget.destroy()
@@ -365,7 +444,15 @@ class Cpp2PlantUMLApp:
         self.status_var.set(f"[{mode_name}] Parsed {count} files, found {len(class_names)} classes")
 
     def _on_search_changed(self, *args):
-        """Filter class list based on search text."""
+        """
+        검색어 변경 시 클래스 목록을 필터링한다.
+
+        검색어를 포함하는 클래스만 표시하고, 나머지는 숨긴다.
+        대소문자를 구분하지 않는다.
+
+        Args:
+            *args: Tkinter trace 콜백 인자 (사용되지 않음)
+        """
         if not hasattr(self, 'class_widgets'):
             return
 
@@ -382,9 +469,23 @@ class Cpp2PlantUMLApp:
         self.class_canvas.configure(scrollregion=self.class_canvas.bbox("all"))
 
     def _get_filter_options(self):
-        """Get currently selected filter options.
-        Returns tuple of (relationship_types, component_options).
-        None/all checked = all types, partial = only selected.
+        """
+        현재 선택된 필터 옵션을 반환한다.
+
+        체크박스 선택 상태를 분석하여 관계 유형 필터와
+        클래스 구성요소 표시 옵션을 결정한다.
+
+        필터 로직:
+            - 아무것도 선택 안 함 → 전체 적용
+            - 모두 선택 → 전체 적용
+            - 일부만 선택 → 선택된 것만 적용
+
+        Returns:
+            tuple: (relationship_types, component_options)
+                - relationship_types: 관계 유형 리스트 또는 None (전체)
+                  예: ['inheritance', 'composition'] 또는 None
+                - component_options: 구성요소 표시 딕셔너리
+                  예: {'members': True, 'methods': False}
         """
         # Relationship types
         rel_checked = [k for k, v in self.rel_filter_vars.items() if v.get()]
@@ -406,17 +507,33 @@ class Cpp2PlantUMLApp:
         return rel_types, comp_options
 
     def _select_all(self):
-        """Select all classes."""
+        """클래스 목록의 모든 체크박스를 선택한다."""
         for var in self.class_vars.values():
             var.set(True)
 
     def _select_none(self):
-        """Deselect all classes."""
+        """클래스 목록의 모든 체크박스를 해제한다."""
         for var in self.class_vars.values():
             var.set(False)
 
     def _generate_diagram(self):
-        """Generate diagram from start class with depth limit."""
+        """
+        시작 클래스 기준으로 다이어그램을 생성한다.
+
+        선택된 시작 클래스에서 지정된 Depth만큼 관계를 탐색하여
+        PlantUML 클래스 다이어그램을 생성한다.
+
+        동작 과정:
+            1. 필터 옵션 확인 (관계 유형, 구성요소 표시)
+            2. RelationshipAnalyzer로 관계 분석 (BFS)
+            3. PlantUMLGenerator로 코드 생성
+            4. 출력 영역에 결과 표시
+            5. Image 모드인 경우 이미지 새로고침
+
+        Raises:
+            messagebox.showerror: 프로젝트가 파싱되지 않았거나
+                                  시작 클래스가 유효하지 않은 경우
+        """
         if not self.parser or not self.generator:
             messagebox.showerror("Error", "Please parse a project first.")
             return
@@ -457,7 +574,23 @@ class Cpp2PlantUMLApp:
             self.status_var.set("Generation failed")
 
     def _generate_all(self):
-        """Generate diagram for all selected classes."""
+        """
+        선택된 모든 클래스에 대한 다이어그램을 생성한다.
+
+        좌측 클래스 목록에서 체크된 클래스들만 포함하여
+        PlantUML 다이어그램을 생성한다. Depth 탐색 없이
+        선택된 클래스 간의 관계만 표시한다.
+
+        동작 과정:
+            1. 체크된 클래스 목록 수집
+            2. 필터 옵션 확인
+            3. 선택된 클래스들 간의 관계만 분석
+            4. PlantUML 코드 생성 및 표시
+
+        Raises:
+            messagebox.showerror: 프로젝트가 파싱되지 않았거나
+                                  선택된 클래스가 없는 경우
+        """
         if not self.parser or not self.generator:
             messagebox.showerror("Error", "Please parse a project first.")
             return
@@ -527,7 +660,12 @@ class Cpp2PlantUMLApp:
             self.status_var.set("Generation failed")
 
     def _copy_to_clipboard(self):
-        """Copy PlantUML to clipboard."""
+        """
+        현재 PlantUML 코드를 클립보드에 복사한다.
+
+        출력 영역의 텍스트를 시스템 클립보드에 복사하여
+        다른 프로그램에서 붙여넣기할 수 있도록 한다.
+        """
         content = self.output_text.get("1.0", tk.END).strip()
         if not content:
             messagebox.showwarning("Warning", "No content to copy.")
@@ -538,7 +676,13 @@ class Cpp2PlantUMLApp:
         self.status_var.set("Copied to clipboard")
 
     def _save_to_file(self):
-        """Save PlantUML to file."""
+        """
+        현재 PlantUML 코드를 파일로 저장한다.
+
+        파일 저장 다이얼로그를 열어 사용자가 저장 위치와
+        파일명을 지정할 수 있도록 한다.
+        기본 확장자는 .puml이다.
+        """
         content = self.output_text.get("1.0", tk.END).strip()
         if not content:
             messagebox.showwarning("Warning", "No content to save.")
@@ -557,7 +701,16 @@ class Cpp2PlantUMLApp:
                 messagebox.showerror("Error", f"Failed to save: {e}")
 
     def _preview_online(self):
-        """Preview diagram on PlantUML online server."""
+        """
+        PlantUML 온라인 서버에서 다이어그램을 미리본다.
+
+        현재 PlantUML 코드를 URL 인코딩하여
+        plantuml.com 서버에서 렌더링된 결과를 브라우저로 연다.
+
+        Note:
+            URL 길이가 8000자를 초과하면 온라인 미리보기가
+            불가능하므로 로컬 PlantUML 사용을 권장한다.
+        """
         content = self.output_text.get("1.0", tk.END).strip()
         if not content:
             messagebox.showwarning("Warning", "No content to preview.")
@@ -580,7 +733,15 @@ class Cpp2PlantUMLApp:
         self.status_var.set("Opened preview in browser")
 
     def _update_line_numbers(self, event=None):
-        """Update line numbers in the line number widget."""
+        """
+        줄 번호 위젯을 업데이트한다.
+
+        출력 텍스트의 줄 수에 맞게 줄 번호를 생성하여 표시한다.
+        텍스트 변경이나 스크롤 시 호출된다.
+
+        Args:
+            event: 이벤트 객체 (선택적, 이벤트 바인딩용)
+        """
         self.line_numbers.configure(state=tk.NORMAL)
         self.line_numbers.delete("1.0", tk.END)
 
@@ -594,17 +755,36 @@ class Cpp2PlantUMLApp:
         self.line_numbers.configure(state=tk.DISABLED)
 
     def _sync_scroll(self, *args):
-        """Sync scrolling between line numbers and text."""
+        """
+        줄 번호와 텍스트 영역의 스크롤을 동기화한다.
+
+        Args:
+            *args: 스크롤바 명령 인자
+        """
         self.output_text.yview(*args)
         self.line_numbers.yview(*args)
 
     def _on_text_scroll(self, scrollbar, *args):
-        """Handle text scroll and sync line numbers."""
+        """
+        텍스트 스크롤 시 줄 번호 위젯도 함께 스크롤한다.
+
+        Args:
+            scrollbar: 스크롤바 위젯
+            *args: 스크롤 위치 인자
+        """
         scrollbar.set(*args)
         self.line_numbers.yview_moveto(args[0])
 
     def _toggle_view(self):
-        """Toggle between text and image view."""
+        """
+        Text/Image 뷰 모드를 전환한다.
+
+        Text 모드: PlantUML 코드를 텍스트로 표시
+        Image 모드: PlantUML 서버에서 렌더링된 이미지 표시
+
+        Image 모드 전환 시 Pillow가 설치되어 있지 않으면
+        경고 메시지를 표시하고 Text 모드로 유지한다.
+        """
         mode = self.view_mode.get()
 
         if mode == "text":
@@ -628,7 +808,23 @@ class Cpp2PlantUMLApp:
                 self._fetch_and_show_image()
 
     def _plantuml_encode(self, text):
-        """Encode PlantUML text for the server URL."""
+        """
+        PlantUML 텍스트를 서버 URL용으로 인코딩한다.
+
+        PlantUML 서버가 요구하는 형식으로 텍스트를 압축하고
+        커스텀 Base64 인코딩을 적용한다.
+
+        인코딩 과정:
+            1. UTF-8로 인코딩
+            2. zlib으로 압축 (레벨 9)
+            3. PlantUML 전용 Base64 변환
+
+        Args:
+            text: 인코딩할 PlantUML 코드
+
+        Returns:
+            str: 인코딩된 문자열 (URL에 사용 가능)
+        """
         # Compress with zlib
         compressed = zlib.compress(text.encode('utf-8'), 9)
 
@@ -658,7 +854,20 @@ class Cpp2PlantUMLApp:
         return ''.join(result)
 
     def _fetch_and_show_image(self):
-        """Fetch PlantUML image from server and display it."""
+        """
+        PlantUML 서버에서 다이어그램 이미지를 가져와 표시한다.
+
+        현재 PlantUML 코드를 인코딩하여 서버에 요청하고,
+        받은 PNG 이미지를 캔버스에 표시한다.
+        네트워크 요청은 별도 스레드에서 수행된다.
+
+        이미지 로드 과정:
+            1. PlantUML 코드 인코딩
+            2. 서버에 HTTP 요청 (PNG 형식)
+            3. PIL로 이미지 로드
+            4. Tkinter PhotoImage로 변환
+            5. 캔버스에 표시
+        """
         if not self.current_plantuml:
             return
 
@@ -688,7 +897,13 @@ class Cpp2PlantUMLApp:
         threading.Thread(target=do_fetch, daemon=True).start()
 
     def _display_image(self, width, height):
-        """Display the fetched image on canvas."""
+        """
+        가져온 이미지를 캔버스에 표시한다.
+
+        Args:
+            width: 이미지 너비 (픽셀)
+            height: 이미지 높이 (픽셀)
+        """
         self.image_canvas.delete("all")
         self.image_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_image)
         self.image_canvas.configure(scrollregion=(0, 0, width, height))
@@ -696,6 +911,12 @@ class Cpp2PlantUMLApp:
 
 
 def main():
+    """
+    애플리케이션 진입점.
+
+    Tkinter root 윈도우를 생성하고 Cpp2PlantUMLApp 인스턴스를
+    초기화한 후 메인 이벤트 루프를 시작한다.
+    """
     root = tk.Tk()
     app = Cpp2PlantUMLApp(root)
     root.mainloop()
