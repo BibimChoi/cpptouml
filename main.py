@@ -48,6 +48,10 @@ class Cpp2PlantUMLApp:
         self.current_plantuml = ""  # Store current PlantUML code
         self.current_image = None  # Store current image for display
 
+        # Filter options
+        self.rel_filter_vars = {}  # Relationship type checkboxes
+        self.component_filter_vars = {}  # Class component checkboxes
+
         self._setup_ui()
 
     def _setup_ui(self):
@@ -105,6 +109,46 @@ class Cpp2PlantUMLApp:
         self.clang_path_btn = ttk.Button(settings_frame, text="Browse...", command=self._browse_libclang)
 
         settings_frame.columnconfigure(1, weight=1)
+
+        # Filter Options section
+        filter_frame = ttk.LabelFrame(main_frame, text="Filter Options", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Relationship type filters (left side)
+        rel_frame = ttk.LabelFrame(filter_frame, text="Relationship Types (Depth)", padding="5")
+        rel_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        rel_types = [
+            ("inheritance", "상속 (Inheritance)"),
+            ("composition", "구성 (Composition)"),
+            ("aggregation", "집합 (Aggregation)"),
+            ("dependency", "의존 (Dependency)")
+        ]
+
+        for i, (key, label) in enumerate(rel_types):
+            var = tk.BooleanVar(value=False)
+            self.rel_filter_vars[key] = var
+            cb = ttk.Checkbutton(rel_frame, text=label, variable=var)
+            cb.grid(row=i // 2, column=i % 2, sticky=tk.W, padx=5, pady=2)
+
+        # Class component filters (right side)
+        comp_frame = ttk.LabelFrame(filter_frame, text="Class Components (Display)", padding="5")
+        comp_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        comp_types = [
+            ("members", "멤버변수 (Members)"),
+            ("methods", "멤버함수 (Methods)")
+        ]
+
+        for i, (key, label) in enumerate(comp_types):
+            var = tk.BooleanVar(value=False)
+            self.component_filter_vars[key] = var
+            cb = ttk.Checkbutton(comp_frame, text=label, variable=var)
+            cb.grid(row=i, column=0, sticky=tk.W, padx=5, pady=2)
+
+        # Info label
+        info_label = ttk.Label(filter_frame, text="※ 선택 안함 또는 모두 선택 = 전체 적용", foreground="gray")
+        info_label.pack(side=tk.BOTTOM, pady=(5, 0))
 
         # Buttons
         btn_frame = ttk.Frame(main_frame)
@@ -337,6 +381,30 @@ class Cpp2PlantUMLApp:
         self.class_list_frame.update_idletasks()
         self.class_canvas.configure(scrollregion=self.class_canvas.bbox("all"))
 
+    def _get_filter_options(self):
+        """Get currently selected filter options.
+        Returns tuple of (relationship_types, component_options).
+        None/all checked = all types, partial = only selected.
+        """
+        # Relationship types
+        rel_checked = [k for k, v in self.rel_filter_vars.items() if v.get()]
+        if len(rel_checked) == 0 or len(rel_checked) == len(self.rel_filter_vars):
+            rel_types = None  # All types
+        else:
+            rel_types = rel_checked
+
+        # Component options
+        comp_checked = [k for k, v in self.component_filter_vars.items() if v.get()]
+        if len(comp_checked) == 0 or len(comp_checked) == len(self.component_filter_vars):
+            comp_options = {"members": True, "methods": True}
+        else:
+            comp_options = {
+                "members": "members" in comp_checked,
+                "methods": "methods" in comp_checked
+            }
+
+        return rel_types, comp_options
+
     def _select_all(self):
         """Select all classes."""
         for var in self.class_vars.values():
@@ -367,7 +435,14 @@ class Cpp2PlantUMLApp:
         self.root.update()
 
         try:
-            plantuml = self.generator.generate_from_class(start_class, depth)
+            # Get filter options
+            rel_types, comp_options = self._get_filter_options()
+
+            plantuml = self.generator.generate_from_class(
+                start_class, depth,
+                rel_type_filter=rel_types,
+                component_options=comp_options
+            )
             self.current_plantuml = plantuml
             self.output_text.delete("1.0", tk.END)
             self.output_text.insert("1.0", plantuml)
@@ -396,6 +471,21 @@ class Cpp2PlantUMLApp:
         self.root.update()
 
         try:
+            # Get filter options
+            rel_types, comp_options = self._get_filter_options()
+
+            # Convert rel_types to RelationType enum for filtering
+            from relationship import RelationType
+            allowed_types = None
+            if rel_types:
+                type_map = {
+                    'inheritance': RelationType.INHERITANCE,
+                    'composition': RelationType.COMPOSITION,
+                    'aggregation': RelationType.AGGREGATION,
+                    'dependency': RelationType.DEPENDENCY
+                }
+                allowed_types = {type_map[t] for t in rel_types if t in type_map}
+
             analyzer = RelationshipAnalyzer(self.parser)
 
             # Get relationships only for selected classes
@@ -406,6 +496,9 @@ class Cpp2PlantUMLApp:
                     rels = analyzer._analyze_class(class_info)
                     # Filter to only include relationships between selected classes
                     for rel in rels:
+                        # Filter by relationship type
+                        if allowed_types and rel.rel_type not in allowed_types:
+                            continue
                         if rel.from_class in selected and rel.to_class in selected:
                             all_rels.append(rel)
 
@@ -418,7 +511,8 @@ class Cpp2PlantUMLApp:
                     seen.add(key)
                     unique_rels.append(rel)
 
-            plantuml = self.generator.generate(set(selected), unique_rels, "Selected Classes Diagram")
+            plantuml = self.generator.generate(
+                set(selected), unique_rels, "Selected Classes Diagram", comp_options)
             self.current_plantuml = plantuml
             self.output_text.delete("1.0", tk.END)
             self.output_text.insert("1.0", plantuml)

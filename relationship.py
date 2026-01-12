@@ -144,22 +144,32 @@ class RelationshipAnalyzer:
                 children.append(class_name)
         return children
 
-    def _find_classes_using(self, target_class: str) -> List[str]:
-        """Find all classes that use the given class (as member or parameter)."""
+    def _find_classes_using(self, target_class: str, allowed_types: Set = None) -> List[str]:
+        """Find all classes that use the given class (as member or parameter).
+
+        Args:
+            target_class: The class to find users of
+            allowed_types: Set of RelationType to filter by (None = all)
+        """
         users = []
         for class_name, class_info in self.parser.classes.items():
             if class_name == target_class:
                 continue
-            # Check members
-            for member in class_info.members:
-                type_name = self._extract_type_name(member.type_name)
-                if type_name == target_class:
-                    users.append(class_name)
-                    break
-            else:
-                # Check method parameters
+
+            found = False
+
+            # Check members (composition/aggregation)
+            if allowed_types is None or (allowed_types & {RelationType.COMPOSITION, RelationType.AGGREGATION}):
+                for member in class_info.members:
+                    type_name = self._extract_type_name(member.type_name)
+                    if type_name == target_class:
+                        users.append(class_name)
+                        found = True
+                        break
+
+            # Check method parameters (dependency)
+            if not found and (allowed_types is None or RelationType.DEPENDENCY in allowed_types):
                 for method in class_info.methods:
-                    found = False
                     for _, param_type in method.parameters:
                         type_name = self._extract_type_name(param_type)
                         if type_name == target_class:
@@ -168,21 +178,37 @@ class RelationshipAnalyzer:
                             break
                     if found:
                         break
+
         return users
 
-    def analyze_from_class(self, start_class: str, max_depth: int = 3) -> tuple:
+    def analyze_from_class(self, start_class: str, max_depth: int = 3,
+                           rel_type_filter: List[str] = None) -> tuple:
         """
         Analyze relationships starting from a specific class using BFS.
 
         Args:
             start_class: The starting class name
             max_depth: Maximum depth to traverse (default: 3)
+            rel_type_filter: List of relationship types to include
+                           (None = all types). Options: 'inheritance',
+                           'composition', 'aggregation', 'dependency'
 
         Returns:
             Tuple of (set of class names, list of relationships)
         """
         if start_class not in self.parser.classes:
             return set(), []
+
+        # Convert filter to RelationType enum values
+        allowed_types = None
+        if rel_type_filter:
+            type_map = {
+                'inheritance': RelationType.INHERITANCE,
+                'composition': RelationType.COMPOSITION,
+                'aggregation': RelationType.AGGREGATION,
+                'dependency': RelationType.DEPENDENCY
+            }
+            allowed_types = {type_map[t] for t in rel_type_filter if t in type_map}
 
         visited: Set[str] = set()
         relationships: List[Relationship] = []
@@ -203,6 +229,10 @@ class RelationshipAnalyzer:
             class_rels = self._analyze_class(class_info)
 
             for rel in class_rels:
+                # Filter by relationship type
+                if allowed_types and rel.rel_type not in allowed_types:
+                    continue
+
                 relationships.append(rel)
 
                 # Add related classes to queue if within depth
@@ -213,15 +243,20 @@ class RelationshipAnalyzer:
                         queue.append((rel.from_class, depth + 1))
 
             # Also find child classes (classes that inherit from this class)
+            # Only if inheritance is allowed
             if depth < max_depth:
-                for child in self._find_child_classes(class_name):
-                    if child not in visited:
-                        queue.append((child, depth + 1))
+                if allowed_types is None or RelationType.INHERITANCE in allowed_types:
+                    for child in self._find_child_classes(class_name):
+                        if child not in visited:
+                            queue.append((child, depth + 1))
 
-                # Also find classes that use this class
-                for user in self._find_classes_using(class_name):
-                    if user not in visited:
-                        queue.append((user, depth + 1))
+                # Also find classes that use this class (composition/aggregation/dependency)
+                if allowed_types is None or (allowed_types & {RelationType.COMPOSITION,
+                                                              RelationType.AGGREGATION,
+                                                              RelationType.DEPENDENCY}):
+                    for user in self._find_classes_using(class_name, allowed_types):
+                        if user not in visited:
+                            queue.append((user, depth + 1))
 
         # Remove duplicate relationships
         seen = set()
